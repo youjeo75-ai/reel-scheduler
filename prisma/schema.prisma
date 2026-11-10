@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled connection, used at runtime
+  directUrl = env("DIRECT_URL") // direct connection, used by `prisma db push`
+}
+
+enum Platform {
+  INSTAGRAM
+  YOUTUBE
+  TIKTOK
+}
+
+enum PostStatus {
+  PENDING // waiting for its scheduled time
+  PROCESSING // claimed by the cron job, publishing in progress
+  PUBLISHED // done
+  FAILED // gave up; see `detail` on the targets
+}
+
+/// One connected account per platform. Tokens are stored AES-256-GCM encrypted.
+model SocialAccount {
+  id          String   @id @default(cuid())
+  platform    Platform @unique
+  /// Instagram user id / YouTube channel id / TikTok open_id
+  externalId  String
+  displayName String?
+
+  accessToken           String // encrypted
+  refreshToken          String? // encrypted. Null for Instagram (its long-lived token refreshes itself)
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime? // TikTok only (365 days)
+  scope                 String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A video scheduled for one or more platforms.
+model Post {
+  id      String @id @default(cuid())
+  title   String
+  caption String @default("")
+
+  /// Object keys inside the storage bucket (needed to delete the files later)
+  videoPath     String
+  thumbnailPath String?
+  /// Public URLs the platforms download from
+  videoUrl      String
+  thumbnailUrl  String?
+
+  /// Always stored in UTC
+  scheduledAt DateTime
+  status      PostStatus @default(PENDING)
+
+  targets   PostTarget[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([status, scheduledAt])
+}
+
+/// Per-platform progress of a post. Lets one platform fail or lag without
+/// re-posting to the ones that already succeeded.
+model PostTarget {
+  id       String     @id @default(cuid())
+  postId   String
+  post     Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  platform Platform
+  status   PostStatus @default(PENDING)
+
+  /// Per-platform options chosen in the form (visibility, tags, comments on/off, caption override…).
+  /// Whitelisted and validated in src/lib/settings.ts before it is stored.
+  settings Json @default("{}")
+
+  /// Handle for the in-flight job: Instagram container id / TikTok publish_id / YouTube video id
+  remoteId     String?
+  publishedUrl String?
+  /// Error message, or a non-fatal note (e.g. thumbnail rejected, TikTok forced private)
+  detail       String?
+  startedAt    DateTime?
+  publishedAt  DateTime?
+
+  @@unique([postId, platform])
+}
