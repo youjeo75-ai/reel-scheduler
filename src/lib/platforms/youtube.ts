@@ -52,7 +52,7 @@ export const youtube: Publisher = {
           selfDeclaredMadeForKids: s.madeForKids ?? false,
           embeddable: s.embeddable ?? true,
           publicStatsViewable: s.publicStatsViewable ?? true,
-          containsSyntheticMedia: s.containsSyntheticMedia ?? false,
+          ...({ containsSyntheticMedia: s.containsSyntheticMedia ?? false } as object),
         },
       },
       media: { mimeType: video.mimeType, body: video.body },
